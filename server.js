@@ -1,12 +1,51 @@
 import { createServer } from "http";
-import { readFile } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import escapeHtml from "escape-html";
+import sanitizeFilename from "sanitize-filename";
 
 createServer(async (req, res) => {
-  const author = "Jae Doe";
-  const postContent = await readFile("./posts/hello-world.txt", "utf8");
-  sendHTML(res, <BlogPostPage postContent={postContent} author={author} />);
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const page = await matchRoute(url);
+    sendHTML(res, <BlogLayout>{page}</BlogLayout>);
+  } catch (err) {
+    console.error(err);
+    res.statusCode = err.statusCode ?? 500;
+    res.end();
+  }
 }).listen(8080);
+
+async function matchRoute(url) {
+  if (url.pathname === "/") {
+    const postFiles = await readdir("./posts");
+    const postSlugs = postFiles.map((file) =>
+      file.slice(0, file.lastIndexOf("."))
+    );
+    const postContents = await Promise.all(
+      postSlugs.map((postSlug) =>
+        readFile("./posts/" + postSlug + ".txt", "utf8")
+      )
+    );
+    return <BlogIndexPage postSlugs={postSlugs} postContents={postContents} />;
+  } else {
+    const postSlug = sanitizeFilename(url.pathname.slice(1));
+    try {
+      const postContent = await readFile(
+        "./posts/" + postSlug + ".txt",
+        "utf8"
+      );
+      return <BlogPostPage postSlug={postSlug} postContent={postContent} />;
+    } catch (err) {
+      throwNotFound(err);
+    }
+  }
+}
+
+function throwNotFound(cause) {
+  const notFound = new Error("Not found.", { cause });
+  notFound.statusCode = 404;
+  throw notFound;
+}
 
 function sendHTML(res, jsx) {
   const html = renderJSXToHTML(jsx);
@@ -15,7 +54,6 @@ function sendHTML(res, jsx) {
 }
 
 function renderJSXToHTML(jsx) {
-  console.log(typeof jsx, jsx);
   if (typeof jsx === "string" || typeof jsx === "number") {
     return escapeHtml(jsx);
   } else if (jsx == null || typeof jsx === "boolean") {
@@ -25,22 +63,20 @@ function renderJSXToHTML(jsx) {
   } else if (typeof jsx === "object") {
     if (jsx.$$typeof === Symbol.for("react.element")) {
       if (typeof jsx.type === "string") {
-        // Is this a tag like <div>?
-        // Existing code that handles HTML tags (like <p>).
         let html = "<" + jsx.type;
-        if (jsx.props.hasOwnProperty(propName) && propName !== "children") {
-          html += " ";
-          html += propName;
-          html += "=";
-          html += escapeHtml(jsx.props[propName]);
+        for (const propName in jsx.props) {
+          if (jsx.props.hasOwnProperty(propName) && propName !== "children") {
+            html += " ";
+            html += propName;
+            html += "=";
+            html += escapeHtml(jsx.props[propName]);
+          }
         }
         html += ">";
         html += renderJSXToHTML(jsx.props.children);
         html += "</" + jsx.type + ">";
         return html;
       } else if (typeof jsx.type === "function") {
-        // Is it a component like <BlogPostPage>?
-        // Call the component with its props, and turn its returned JSX into HTML.
         const Component = jsx.type;
         const props = jsx.props;
         const returnedJsx = Component(props);
@@ -50,7 +86,32 @@ function renderJSXToHTML(jsx) {
   } else throw new Error("Not implemented.");
 }
 
-function BlogPostPage({ postContent, author }) {
+function BlogPostPage({ postSlug, postContent }) {
+  return (
+    <section>
+      <h2>
+        <a href={"/" + postSlug}>{postSlug}</a>
+      </h2>
+      <article>{postContent}</article>
+    </section>
+  );
+}
+
+function Footer({ author }) {
+  return (
+    <footer>
+      <hr />
+      <p>
+        <i>
+          (c) {author} {new Date().getFullYear()}
+        </i>
+      </p>
+    </footer>
+  );
+}
+
+function BlogLayout({ children }) {
+  const author = "Jae Doe";
   return (
     <html>
       <head>
@@ -61,22 +122,27 @@ function BlogPostPage({ postContent, author }) {
           <a href="/">Home</a>
           <hr />
         </nav>
-        <article>{postContent}</article>
+        <main>{children}</main>
         <Footer author={author} />
       </body>
     </html>
   );
 }
 
-function Footer({ author }) {
+function BlogIndexPage({ postSlugs, postContents }) {
   return (
-    <footer>
-      <hr />
-      <p>
-        <i>
-          (c) {author}, {new Date().getFullYear()}
-        </i>
-      </p>
-    </footer>
+    <section>
+      <h1>Welcome to my blog</h1>
+      <div>
+        {postSlugs.map((postSlug, index) => (
+          <section key={postSlug}>
+            <h2>
+              <a href={"/" + postSlug}>{postSlug}</a>
+            </h2>
+            <article>{postContents[index]}</article>
+          </section>
+        ))}
+      </div>
+    </section>
   );
 }
