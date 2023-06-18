@@ -6,7 +6,11 @@ import sanitizeFilename from "sanitize-filename";
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    sendHTML(res, <Router url={url} />);
+    if (url.pathname === "/client.js") {
+      await sendScript(res, "./client.js");
+    } else {
+      await sendHTML(res, <Router url={url} />);
+    }
   } catch (err) {
     console.error(err);
     res.statusCode = err.statusCode ?? 500;
@@ -32,9 +36,16 @@ function throwNotFound(cause) {
 }
 
 async function sendHTML(res, jsx) {
-  const html = await renderJSXToHTML(jsx);
+  let html = await renderJSXToHTML(jsx);
+  html += `<script type="module" src="/client.js"></script>`;
   res.setHeader("Content-Type", "text/html");
   res.end(html);
+}
+
+async function sendScript(res, filename) {
+  const content = await readFile(filename, "utf8");
+  res.setHeader("Content-Type", "text/javascript");
+  res.end(content);
 }
 
 async function renderJSXToHTML(jsx) {
@@ -117,6 +128,8 @@ function BlogLayout({ children }) {
       <body>
         <nav>
           <a href="/">Home</a>
+          <hr />
+          <input />
           <hr />
         </nav>
         <main>{children}</main>
